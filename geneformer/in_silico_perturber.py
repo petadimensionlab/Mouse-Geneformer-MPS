@@ -94,7 +94,7 @@ def quant_layers(model):
     return int(max(layer_nums))+1
 
 def get_model_input_size(model):
-    return int(re.split("\(|,",str(model.bert.embeddings.position_embeddings))[1])
+    return int(re.split(r"\(|,",str(model.bert.embeddings.position_embeddings))[1])
 
 def flatten_list(megalist):
     return [item for sublist in megalist for item in sublist]
@@ -121,11 +121,11 @@ def get_possible_states(cell_states_to_model):
     return possible_states
 
 def forward_pass_single_cell(model, example_cell, layer_to_quant):
-    example_cell.set_format(type="torch")
-    input_data = example_cell["input_ids"]
+    # example_cell is a Dataset with 1 row from .select([i])
+    # Get the first (only) row as a list and convert to tensor
+    input_data = torch.tensor(example_cell["input_ids"][0]).unsqueeze(0)
     with torch.no_grad():
         outputs = model(
-            #input_ids = input_data.to("cuda")
             input_ids = input_data.to(ISP_device)
         )
     emb = torch.squeeze(outputs.hidden_states[layer_to_quant])
@@ -268,7 +268,7 @@ def make_perturbation_batch(example_cell,
             pass
         indices_to_perturb = [[i] for i in range(range_start, (example_cell["length"][0]-range_end))]
     elif combo_lvl>0 and (anchor_token is not None): 
-        example_input_ids = example_cell["input_ids "][0]
+        example_input_ids = example_cell["input_ids"][0]
         anchor_index = example_input_ids.index(anchor_token[0])
         indices_to_perturb = [sorted([anchor_index,i]) if i!=anchor_index else None for i in range(example_cell["length"][0])]  
         indices_to_perturb = [item for item in indices_to_perturb if item is not None]
@@ -287,7 +287,7 @@ def make_perturbation_batch(example_cell,
             all_indices = [index for index in all_indices if index not in indices_to_perturb]
             indices_to_perturb = [[[j for i in indices_to_perturb for j in i], x] for x in all_indices]
     length = len(indices_to_perturb) # 
-    perturbation_dataset = Dataset.from_dict({"input_ids": example_cell["input_ids"]*length, 
+    perturbation_dataset = Dataset.from_dict({"input_ids": [example_cell["input_ids"][0]] * length, 
                                               "perturb_index": indices_to_perturb})
     if length<400:
         num_proc_i = 1
@@ -368,10 +368,9 @@ def get_cell_state_avg_embs(model,
             max_range = min(i+forward_batch_size, total_batch_length)
                 
             state_minibatch = filtered_input_data_state.select([i for i in range(i, max_range)])
-            state_minibatch.set_format(type="torch")
             
-            input_data_minibatch = state_minibatch["input_ids"]
-            original_lens += state_minibatch["length"]
+            input_data_minibatch = [torch.tensor(x) for x in state_minibatch["input_ids"]]
+            original_lens += list(state_minibatch["length"])
             input_data_minibatch = pad_tensor_list(input_data_minibatch, 
                                                    max_len, 
                                                    pad_token_id, 
@@ -468,9 +467,7 @@ def quant_cos_sims(model,
                 return example
             minibatch = minibatch.map(pad_or_trunc_example, num_proc=nproc)
 
-        minibatch.set_format(type="torch")
-        
-        input_data_minibatch = minibatch["input_ids"]
+        input_data_minibatch = torch.stack([torch.tensor(x) for x in minibatch["input_ids"]])
         attention_mask = gen_attention_mask(minibatch, max_len)
         
         # extract embeddings for perturbation minibatch
@@ -1362,7 +1359,7 @@ class InSilicoPerturber:
             for i in trange(len(filtered_input_data)):
                 example_cell = filtered_input_data.select([i])
                 original_emb = forward_pass_single_cell(model, example_cell, layer_to_quant)
-                gene_list = torch.squeeze(example_cell["input_ids"])
+                gene_list = torch.squeeze(torch.tensor(example_cell["input_ids"][0]))
                 
                 # reset to original type to prevent downstream issues due to forward_pass_single_cell modifying as torch format in place
                 example_cell = filtered_input_data.select([i])

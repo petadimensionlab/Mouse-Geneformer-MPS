@@ -28,6 +28,7 @@ import anndata as ad
 import loompy as lp
 import numpy as np
 import scipy.sparse as sp
+import torch
 from datasets import Dataset
 
 from time import time
@@ -39,12 +40,21 @@ import sys
 logger = logging.getLogger(__name__)
 
 
-# setting 
-USE_GPU = "cuda:0"
+# setting
+def get_torch_device():
+    if torch.cuda.is_available():
+        return "cuda:0"
+    elif torch.backends.mps.is_available():
+        return "mps"
+    else:
+        return "cpu"
+
+DEVICE = get_torch_device()
+USE_GPU = DEVICE
 
 # need file path
-GENE_MEDIAN_FILE = "/path/to/mediam/dictionary/gene_median_dictionary.pkl"
-TOKEN_DICTIONARY_FILE = "/path/to/token/dictionary/MLM-re_token_dictionary_v1.pkl"
+GENE_MEDIAN_FILE = "/Users/petadimensionlab/workspace/zedws/Mouse-Geneformer/data/Mouse-Genecorpus-20M/mouse_gene_median_dictionary.pkl"
+TOKEN_DICTIONARY_FILE = "/Users/petadimensionlab/workspace/zedws/Mouse-Geneformer/data/Mouse-Genecorpus-20M/MLM-re_token_dictionary_v1.pkl"
 
 
 def rank_genes(gene_vector, gene_tokens):
@@ -73,7 +83,7 @@ def load_not_use_files(csv_file_path) :
         reader = csv.reader(f)
         for row in reader :
             not_use_file_paths.append(row[0])
-    
+
     return not_use_file_paths
 
 
@@ -157,24 +167,24 @@ class TranscriptomeTokenizer:
 
         data_set_num = self.start_reading_file_num
         while(1) :
-            
+
             tokenized_cells, cell_metadata = self.tokenize_files(
                 data_set_num, data_directory, file_format
             )
             if int(len(tokenized_cells)) == 0 :
                 continue
-            
+
             tokenized_dataset = self.create_dataset(tokenized_cells, cell_metadata, use_generator=use_generator)
-            
+
             output_path = output_directory+"/"+output_prefix+"_"+str(data_set_num)+".dataset"
             tokenized_dataset.save_to_disk(output_path)
             print("saved to {}".format(output_path))
-            
+
             if self.last_dataset_flag == True :
                 break
 
             data_set_num += 1
-        
+
 
 
     def tokenize_files(
@@ -194,16 +204,16 @@ class TranscriptomeTokenizer:
         total_loom_datas = len(glob.glob(data_directory+"*.loom"))
         total_cells_num = 0
         for enum1, file_path in enumerate(Path(data_directory).glob("*.{}".format(file_format))):
-            if (enum1 < self.start_reading_file_num) : 
+            if (enum1 < self.start_reading_file_num) :
                 continue
             file_found = 1
             print("=================================")
             print("[{} / {}]".format(enum1, total_loom_datas))
             print("Tokenizing : {}".format(file_path))
-            
+
             file_tokenized_cells, file_cell_metadata, cells_num = tokenize_file_fn(file_path)
             tokenized_cells += file_tokenized_cells
-            
+
             if self.custom_attr_name_dict is not None:
                 for k in cell_attr:
                     cell_metadata[self.custom_attr_name_dict[k]] += file_cell_metadata[k]
@@ -221,7 +231,7 @@ class TranscriptomeTokenizer:
                     break
                 else :
                     pass
-        
+
 
         if file_found == 0:
             logger.error(
@@ -296,14 +306,14 @@ class TranscriptomeTokenizer:
     def tokenize_loom(self, loom_file_path, target_sum=10_000):
         if self.custom_attr_name_dict is not None:
             file_cell_metadata = {
-                attr_key: [] for attr_key in self.custom_attr_name_dict.keys() 
+                attr_key: [] for attr_key in self.custom_attr_name_dict.keys()
             }
-        
+
         loom_file_median = self.gene_median_file_path_dict[str(loom_file_path)]
         print(f"読み込んだloom fileのmedian file: {loom_file_median}")
         with open(loom_file_median, "rb") as f:
             self.gene_median_dict = pickle.load(f)
-        
+
         # gene keys for full vocabulary
         self.gene_keys = list(self.gene_median_dict.keys())
 
@@ -380,7 +390,7 @@ class TranscriptomeTokenizer:
 
     def create_dataset(self, tokenized_cells, cell_metadata, use_generator=False):
         print("Creating dataset.")
-           
+
         dataset_dict = {"input_ids": tokenized_cells}
         if self.custom_attr_name_dict is not None: # skip
             dataset_dict.update(cell_metadata)
@@ -394,19 +404,19 @@ class TranscriptomeTokenizer:
         else:
             output_dataset = Dataset.from_dict(dataset_dict)
 
-        # truncate dataset        
+        # truncate dataset
         def truncate(example):
             example["input_ids"] = example["input_ids"][:2048]
             return example
-        
+
         output_dataset_truncated = output_dataset.map(truncate, num_proc=self.nproc)
-        
+
 
         # measure lengths of dataset
         def measure_length(example):
             example["length"] = len(example["input_ids"])
             return example
-        
+
         output_dataset_truncated_w_length = output_dataset_truncated.map(
             measure_length, num_proc=self.nproc
         )

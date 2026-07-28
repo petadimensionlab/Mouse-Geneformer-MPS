@@ -52,8 +52,16 @@ _is_torch_generator_available = False
 if version.parse(torch.__version__) >= version.parse("1.6"):
     _is_torch_generator_available = True
 
-with open(TOKEN_DICTIONARY_FILE, "rb") as f:
-    token_dictionary = pickle.load(f)
+try:
+    with open(TOKEN_DICTIONARY_FILE, "rb") as f:
+        token_dictionary = pickle.load(f)
+except FileNotFoundError:
+    logger.warning(
+        f"Token dictionary not found at '{TOKEN_DICTIONARY_FILE}'. "
+        "Using minimal placeholder. "
+        "Set TOKEN_DICTIONARY_FILE in tokenizer.py to use full vocabulary."
+    )
+    token_dictionary = {"<mask>": 1, "<pad>": 0}
 
 
 class ExplicitEnum(Enum):

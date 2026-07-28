@@ -77,8 +77,7 @@ def get_embs(model,
     elif summary_stat is not None:
         # test embedding extraction for example cell and extract # emb dims
         example = filtered_input_data.select([i for i in range(1)])
-        example.set_format(type="torch")
-        emb_dims = test_emb(model, example["input_ids"], layer_to_quant)
+        emb_dims = test_emb(model, torch.tensor(example["input_ids"][0]), layer_to_quant)
         # initiate tdigests for # of emb dims
         embs_tdigests = [TDigest() for _ in range(emb_dims)]
 
@@ -88,10 +87,8 @@ def get_embs(model,
         minibatch = filtered_input_data.select([i for i in range(i, max_range)])
         max_len = max(minibatch["length"])
         #original_lens = torch.tensor(minibatch["length"]).to("cuda")
-        original_lens = torch.tensor(minibatch["length"]).to(EMB_device)
-        minibatch.set_format(type="torch")
-
-        input_data_minibatch = minibatch["input_ids"]
+        original_lens = torch.tensor(list(minibatch["length"])).to(EMB_device)
+        input_data_minibatch = [torch.tensor(x) for x in minibatch["input_ids"]]
         input_data_minibatch = pad_tensor_list(input_data_minibatch, 
                                                max_len, 
                                                pad_token_id, 

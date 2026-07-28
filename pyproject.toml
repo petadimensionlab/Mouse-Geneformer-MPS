@@ -1,0 +1,59 @@
+[project]
+name = "mouse-geneformer"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.0.0,<3",
+    "torch>=2.2.0,<3",
+    "transformers>=4.40.0,<5",
+    "datasets>=2.14.5",
+    "numba>=0.60.0",
+    "pandas>=2.2.0",
+    "scipy>=1.14.0",
+    "scikit-learn>=1.5.0",
+    "matplotlib>=3.9.0",
+    "h5py>=3.11.0",
+    "statsmodels>=0.14.2",
+    "anndata>=0.10.8",
+    "scanpy>=1.10.0",
+    "umap-learn>=0.5.6",
+    "pynndescent>=0.5.12",
+    "seaborn>=0.13.0",
+    "loompy>=3.0.7",
+    "numpy-groupies>=0.9.22",
+    "natsort>=8.4.0",
+    "tqdm>=4.66.0",
+    "tdigest>=0.5.2.2",
+    "packaging>=23.0",
+    "tblib>=1.7.0",
+    "boto3>=1.28.0",
+    "regex>=2023.8.0",
+    "safetensors>=0.3.0",
+    "tokenizers>=0.15.0",
+    "accelerate>=0.23.0",
+    "jupyter>=1.0.0",
+    "ipykernel>=6.25.0",
+    "ipywidgets>=8.1.0",
+    "matplotlib-inline>=0.1.6",
+    "ipympl>=0.9.0",
+]
+
+[project.optional-dependencies]
+cuda = [
+    "nvidia-cublas-cu11>=11.10.3",
+    "nvidia-cuda-cupti-cu11>=11.7.101",
+    "nvidia-cuda-nvrtc-cu11>=11.7.99",
+    "nvidia-cuda-runtime-cu11>=11.7.99",
+    "nvidia-cudnn-cu11>=8.5.0",
+    "nvidia-nccl-cu11>=2.14.3",
+]
+deepspeed = ["deepspeed>=0.10.3"]
+dev = [
+    "pytest>=7.0",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
