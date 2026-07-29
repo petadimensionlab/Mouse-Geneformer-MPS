@@ -78,7 +78,7 @@ snapshot_download(
 )
 ```
 
-After downloading, update the paths in `geneformer/tokenizer.py` (lines 56-57) to match your local paths.
+The paths are now automatically resolved relative to the project directory — no manual path editing needed.
 
 ## Setup
 
@@ -109,6 +109,17 @@ The device is automatically detected (MPS → CUDA → CPU):
 from geneformer.tokenizer import DEVICE
 print(DEVICE)  # "mps" on Apple Silicon, "cuda:0" on NVIDIA, "cpu" otherwise
 ```
+
+### Automatic Resource Tuning
+
+The `InSilicoPerturber` and `EmbExtractor` classes automatically tune batch size and CPU parallelism based on available hardware:
+
+- **`forward_batch_size`**: Calculated from free VRAM (~350 MiB per sample at 2048 tokens, cap 250)
+- **`nproc`**: Set to half of available CPU cores
+
+Tensor Cores are automatically enabled on compatible NVIDIA GPUs (`torch.set_float32_matmul_precision("high")`).
+
+To use these defaults, simply omit `forward_batch_size` and `nproc` when constructing the class. Explicit values override auto-tuning.
 
 ## Usage
 
@@ -145,9 +156,29 @@ This project relies on several data files that must be downloaded separately:
 | Evaluation dataset | Set directly in notebook | HuggingFace dataset `eval_dataset/` |
 | Pretrained model | Set in notebook | Google Drive |
 
-Update the paths in `geneformer/tokenizer.py` (lines 56-57) and the notebooks to point to your downloaded files.
+All paths are now automatically resolved relative to the project directory.
 
 ## Changelog
+
+### v0.2.0 — Path Portability, Auto-Resource Tuning, and Build Fixes
+
+**Portable Path Resolution**
+- `geneformer/tokenizer.py`: Hardcoded absolute paths replaced with `Path(__file__).parent.parent` — files are now found relative to the project directory, no manual path editing needed after download
+- `geneformer/in_silico_perturber_stats.py`: `GENE_NAME_ID_DICTIONARY_FILE` path similarly made portable
+- `in_silico_perturbation.ipynb`: All hardcoded `/Users/petadimensionlab/...` paths replaced with relative paths (`./results/`, `./mouse-Geneformer-L12-E20/`)
+
+**Automatic Resource Tuning** (NVIDIA GB10 / large-GPU optimized)
+- `geneformer/in_silico_perturber.py`:
+  - `auto_forward_batch_size()`: Calculates optimal batch size from available VRAM (~350 MiB per sample, capped at 250 for safe 2048-token sequences)
+  - `auto_nproc()`: Uses half of available CPU cores (avoids system overload)
+  - `torch.set_float32_matmul_precision("high")`: Enables Tensor Cores on compatible GPUs
+  - `load_model()`: Simplified GPU placement
+  - `InSilicoPerturber.__init__` defaults are overridden with auto-tuned values when defaults are used
+- `geneformer/emb_extractor.py`: Same auto-tuning for `forward_batch_size` and `nproc`
+- `in_silico_perturbation.ipynb`: Removed explicit `forward_batch_size` and `nproc` from `InSilicoPerturber` call (now uses auto-tuned defaults)
+
+**Build System Fix**
+- `pyproject.toml`: Added `[tool.setuptools.packages.find]` with `include = ["geneformer*"]` to fix setuptools flat-layout error caused by the `data/` directory
 
 ### Migration to NumPy 2+ and MPS Support
 

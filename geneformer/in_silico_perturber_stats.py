@@ -35,7 +35,8 @@ from .tokenizer import TOKEN_DICTIONARY_FILE
 import sys
 
 
-GENE_NAME_ID_DICTIONARY_FILE = "/Users/petadimensionlab/workspace/Mouse-Geneformer-MPS/data/Mouse-Genecorpus-20M/MLM-re_token_dictionary_v1_GeneSymbol_to_EnsemblID.pkl"
+_HERE = Path(__file__).parent.parent
+GENE_NAME_ID_DICTIONARY_FILE = str(_HERE / "data" / "Mouse-Genecorpus-20M" / "MLM-re_token_dictionary_v1_GeneSymbol_to_EnsemblID.pkl")
 
 
 logger = logging.getLogger(__name__)

@@ -28,6 +28,7 @@ Usage:
 # imports
 import itertools as it
 import logging
+import os
 import numpy as np
 import pickle
 import re
@@ -47,6 +48,23 @@ logger = logging.getLogger(__name__)
 
 ISP_device = USE_GPU
 
+if ISP_device != "cpu":
+    torch.set_float32_matmul_precision("high")
+
+_CPU_COUNT = len(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else (os.cpu_count() or 4)
+
+def auto_forward_batch_size(free_mib=None):
+    if torch.cuda.is_available():
+        free, total = torch.cuda.mem_get_info(0)
+        free_mib = free / (1024 * 1024)
+    else:
+        return 100
+    # ~350 MiB per sample at 2048 tokens: reserve 2 GiB for model/overhead
+    estimate = int((free_mib - 2048) / 350)
+    return max(min(estimate, 250), 100)
+
+def auto_nproc():
+    return max(_CPU_COUNT // 2, 1)
 
 # load data and filter by defined criteria
 def load_and_filter(filter_data, nproc, input_data_file):
@@ -81,8 +99,6 @@ def load_model(model_type, num_classes, model_directory):
                                                 output_attentions=False)
     # put the model in eval mode for fwd pass
     model.eval()
-    #model = model.to("cuda:0")
-    #model = model.to("cuda")
     model = model.to(ISP_device)
     return model
 
@@ -927,8 +943,8 @@ class InSilicoPerturber:
         self.max_ncells = max_ncells
         self.cell_inds_to_perturb = cell_inds_to_perturb
         self.emb_layer = emb_layer
-        self.forward_batch_size = forward_batch_size
-        self.nproc = nproc
+        self.forward_batch_size = auto_forward_batch_size() if forward_batch_size == 100 else forward_batch_size
+        self.nproc = auto_nproc() if nproc == 4 else nproc
 
         self.validate_options()
 
