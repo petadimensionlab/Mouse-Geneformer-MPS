@@ -173,3 +173,6 @@ isp.perturb_data(
 - `geneformer/emb_extractor.py`: 同上の `set_format` → 明示的な tensor 変換の修正
 - `geneformer/__init__.py`: 存在しないクラスのインポートを削除（`Cell_Type_Classification_TranscriptomeTokenizer`、`In_Silico_TranscriptomeTokenizer`）
 - `geneformer/in_silico_perturber.py`: 正規表現のエスケープシーケンスを修正（raw string `r"\(|,"`）
+- `geneformer/tokenizer.py`: データパスを旧ワークスペース（`zedws/Mouse-Geneformer`）から現ワークスペース（`Mouse-Geneformer-MPS`）に更新
+- `geneformer/in_silico_perturber_stats.py`: `GENE_NAME_ID_DICTIONARY_FILE` のプレースホルダパス（`/path/to/save/...`）を実際のデータディレクトリに修正
+- `in_silico_perturbation.ipynb`: `ispstats.get_stats()` に渡す出力パスの先頭の `/` が欠落していた問題を修正

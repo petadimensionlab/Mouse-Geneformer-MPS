@@ -173,3 +173,6 @@ Key changes from the original codebase:
 - `geneformer/emb_extractor.py`: Same `set_format` → explicit tensor conversion fixes
 - `geneformer/__init__.py`: Removed imports of non-existent classes (`Cell_Type_Classification_TranscriptomeTokenizer`, `In_Silico_TranscriptomeTokenizer`)
 - `geneformer/tokenizer.py`: Fixed escape sequence in regex (raw string `r"\(|,"`)
+- `geneformer/tokenizer.py`: Updated hardcoded data paths from old workspace (`zedws/Mouse-Geneformer`) to current workspace (`Mouse-Geneformer-MPS`)
+- `geneformer/in_silico_perturber_stats.py`: Fixed placeholder path `GENE_NAME_ID_DICTIONARY_FILE` (`/path/to/save/...`) to actual data directory
+- `in_silico_perturbation.ipynb`: Fixed missing leading `/` in output path passed to `ispstats.get_stats()`

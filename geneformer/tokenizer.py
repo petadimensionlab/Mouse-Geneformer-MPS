@@ -53,8 +53,8 @@ DEVICE = get_torch_device()
 USE_GPU = DEVICE
 
 # need file path
-GENE_MEDIAN_FILE = "/Users/petadimensionlab/workspace/zedws/Mouse-Geneformer/data/Mouse-Genecorpus-20M/mouse_gene_median_dictionary.pkl"
-TOKEN_DICTIONARY_FILE = "/Users/petadimensionlab/workspace/zedws/Mouse-Geneformer/data/Mouse-Genecorpus-20M/MLM-re_token_dictionary_v1.pkl"
+GENE_MEDIAN_FILE = "/Users/petadimensionlab/workspace/Mouse-Geneformer-MPS/data/Mouse-Genecorpus-20M/mouse_gene_median_dictionary.pkl"
+TOKEN_DICTIONARY_FILE = "/Users/petadimensionlab/workspace/Mouse-Geneformer-MPS/data/Mouse-Genecorpus-20M/MLM-re_token_dictionary_v1.pkl"
 
 
 def rank_genes(gene_vector, gene_tokens):
