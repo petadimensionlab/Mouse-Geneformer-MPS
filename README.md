@@ -1,24 +1,10 @@
-# Mouse-Geneformer
+# Mouse-Geneformer MPS compatible update
 
-Writer: Keita Ito
+Writer: Shinji Nakaoka
 
-## Abstract
+## Note
 
-This repository contains the source code of mouse-Geneformer for analyzing single-cell RNA-sequence data of mouse. Mouse-Geneformer is a model pre-trained on the large mouse single-cell dataset mouse-Genecorpus-20M and designed to map the mouse gene network. It improves the accuracy of cell type classification of mouse cells and enables in silico perturbation experiments on mouse specimens.
-
-[[bioRxiv](https://www.biorxiv.org/content/10.1101/2024.09.09.611960v1)]
-
-## Citation
-
-```bibtex
-@article{Ito2024.09.09.611960,
-   author = {Ito, Keita and Hirakawa, Tsubasa and Shigenobu, Shuji and Fujiyoshi, Hironobu and Yamashita, Takayoshi},
-   title = {Mouse-Geneformer: A Deep Leaning Model for Mouse Single-Cell Transcriptome and Its Cross-Species Utility},
-   journal = {bioRxiv},
-   year = {2024},
-   URL = {https://www.biorxiv.org/content/early/2024/09/13/2024.09.09.611960}
-}
-```
+This repository contains the source code of mouse-Geneformer to work with Apple Silicon GPU (MPS). 
 
 ## Pretrained Models
 
@@ -197,11 +183,13 @@ Key changes from the original codebase:
 
 - `geneformer/in_silico_perturber.py`:
   - `forward_pass_single_cell`: Fixed batch dimension (added `.unsqueeze(0)`)
-  - `make_perturbation_batch`: Fixed Column multiplication erro
+  - `make_perturbation_batch`: Fixed Column multiplication error
   - `compute_batch_embeddings` / `get_cell_state_avg_embs`: Replaced `set_format(type="torch")` with explicit tensor conversion for datasets v5 compatibility
+  - `cos_sim_shift`: Added automatic dimension unification — unsqueezes 2D `[seq, hidden]` tensors to 3D `[batch, seq, hidden]` before comparison, preventing shape mismatches when processing batched perturbations
+  - `empty_cache()`: Replaced all `torch.cuda.empty_cache()` calls with an MPS-aware helper that handles both CUDA and MPS (`torch.mps.empty_cache()`)
   - Fixed typo: `"input_ids "` → `"input_ids"` (extra space in key name)
 - `geneformer/pretrainer.py`: Graceful handling of missing token dictionary file (uses minimal placeholder)
-- `geneformer/emb_extractor.py`: Same `set_format` → explicit tensor conversion fixes
+- `geneformer/emb_extractor.py`: Same `set_format` → explicit tensor conversion fixes; same `torch.cuda.empty_cache()` → `empty_cache()` replacement
 - `geneformer/__init__.py`: Removed imports of non-existent classes (`Cell_Type_Classification_TranscriptomeTokenizer`, `In_Silico_TranscriptomeTokenizer`)
 - `geneformer/tokenizer.py`: Fixed escape sequence in regex (raw string `r"\(|,"`)
 - `geneformer/tokenizer.py`: Updated hardcoded data paths from old workspace (`zedws/Mouse-Geneformer`) to current workspace (`Mouse-Geneformer-MPS`)

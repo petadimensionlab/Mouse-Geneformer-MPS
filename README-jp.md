@@ -199,9 +199,11 @@ isp.perturb_data(
   - `forward_pass_single_cell`: バッチ次元の欠落を修正（`.unsqueeze(0)` を追加）
   - `make_perturbation_batch`: Column の乗算エラーを修正
   - `compute_batch_embeddings` / `get_cell_state_avg_embs`: datasets v5 互換性のため `set_format(type="torch")` を明示的な tensor 変換に置き換え
+  - `cos_sim_shift`: 次元の自動統一を追加 — 2D `[seq, hidden]` を 3D `[batch, seq, hidden]` に unsqueeze してから比較することで、バッチ処理時のシェイプ不一致を防止
+  - `empty_cache()`: 全ての `torch.cuda.empty_cache()` を MPS 対応のヘルパー関数に置き換え（CUDA と MPS 両対応）
   - タイポ修正: `"input_ids "` → `"input_ids"`（キー名の余分なスペース）
 - `geneformer/pretrainer.py`: トークン辞書ファイルがない場合のグレースフルハンドリング（最小限のプレースホルダーを使用）
-- `geneformer/emb_extractor.py`: 同上の `set_format` → 明示的な tensor 変換の修正
+- `geneformer/emb_extractor.py`: 同上の `set_format` → 明示的な tensor 変換の修正、`torch.cuda.empty_cache()` → `empty_cache()` の置き換え
 - `geneformer/__init__.py`: 存在しないクラスのインポートを削除（`Cell_Type_Classification_TranscriptomeTokenizer`、`In_Silico_TranscriptomeTokenizer`）
 - `geneformer/in_silico_perturber.py`: 正規表現のエスケープシーケンスを修正（raw string `r"\(|,"`）
 - `geneformer/tokenizer.py`: データパスを旧ワークスペース（`zedws/Mouse-Geneformer`）から現ワークスペース（`Mouse-Geneformer-MPS`）に更新

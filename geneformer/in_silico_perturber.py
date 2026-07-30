@@ -112,6 +112,13 @@ def quant_layers(model):
 def get_model_input_size(model):
     return int(re.split(r"\(|,",str(model.bert.embeddings.position_embeddings))[1])
 
+def empty_cache():
+    """Clear GPU/MPS cache. Works with both CUDA and MPS."""
+    if torch.cuda.is_available():
+        empty_cache()
+    elif torch.backends.mps.is_available():
+        torch.mps.empty_cache()
+
 def flatten_list(megalist):
     return [item for sublist in megalist for item in sublist]
 
@@ -407,7 +414,7 @@ def get_cell_state_avg_embs(model,
             del input_data_minibatch
             del attention_mask
             del state_embs_i
-            torch.cuda.empty_cache()
+            empty_cache()
 
         state_embs = torch.cat(state_embs_list)
         avg_state_emb = mean_nonpadding_embs(state_embs, torch.Tensor(original_lens).to(ISP_device))
@@ -665,7 +672,7 @@ def quant_cos_sims(model,
             del minibatch_comparison
         if perturb_group == True:
             del original_minibatch_emb
-        torch.cuda.empty_cache()
+        empty_cache()
     if cell_states_to_model is None:
         cos_sims_stack = torch.cat(cos_sims)
         return cos_sims_stack
@@ -683,6 +690,13 @@ def cos_sim_shift(original_emb,
                   original_minibatch_lengths = None, 
                   minibatch_lengths = None):
     cos = torch.nn.CosineSimilarity(dim=2)
+    # Ensure all tensors are 3D [batch, seq, hidden] for consistent handling
+    if original_emb.dim() == 2:
+        original_emb = original_emb.unsqueeze(0)
+    if minibatch_emb.dim() == 2:
+        minibatch_emb = minibatch_emb.unsqueeze(0)
+    if end_emb.dim() == 2:
+        end_emb = end_emb.unsqueeze(1)
     if original_emb.size() != minibatch_emb.size():
         logger.error(
             f"Embeddings are not the same dimensions. " \
@@ -1571,7 +1585,7 @@ class InSilicoPerturber:
                     # reset dict
                     del cos_sims_dict
                     cos_sims_dict = defaultdict(list)
-                    torch.cuda.empty_cache()
+                    empty_cache()
 
             # save remainder cells
             with open(f"{output_path_prefix}{pickle_batch}_raw.pickle", "wb") as fp:

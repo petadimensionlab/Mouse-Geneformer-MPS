@@ -46,6 +46,7 @@ from transformers import BertForMaskedLM, BertForTokenClassification, BertForSeq
 from .tokenizer import TOKEN_DICTIONARY_FILE
 
 from .in_silico_perturber import downsample_and_sort, \
+                                 empty_cache, \
                                  gen_attention_mask, \
                                  get_model_input_size, \
                                  load_and_filter, \
@@ -119,7 +120,7 @@ def get_embs(model,
         del input_data_minibatch
         del embs_i
         del mean_embs
-        torch.cuda.empty_cache()            
+        empty_cache()            
     
     if summary_stat is None:
         embs_stack = torch.cat(embs_list)
