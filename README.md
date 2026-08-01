@@ -146,6 +146,21 @@ All paths are now automatically resolved relative to the project directory.
 
 ## Changelog
 
+### v0.3.0 — h5ad Tokenization Support
+
+- **`execute_tokenizer.py`**: Now runs with **h5ad** input instead of loom
+  - `file_format="h5ad"` with `data_directory="./data/tutorial_h5ad/"`, `output_directory="./data/tokenized/"`, `output_prefix="tutorial_mouse"`
+  - `nproc` auto-set to `min(8, os.cpu_count())`
+- **Tutorial data**: Uses `scanpy.datasets.paul15()` (mouse bone marrow, 2,730 cells × 3,451 genes)
+  - Gene symbols mapped to mouse Ensembl IDs (`ENSMUSG...`) using the project's `GeneSymbol_to_EnsemblID.pkl` (3,107 genes matched the token dictionary)
+  - `obs["n_counts"]` computed from raw counts
+- **`geneformer/tokenizer.py` h5ad path fixes** (h5ad path was previously non-functional):
+  - `self.genelist_dict` now initialized in `__init__` (was only set in the loom path → `AttributeError` on h5ad-only runs)
+  - `ad.read()` (deprecated) → `ad.read_h5ad()`
+  - Pandas label-vs-positional indexing: `adata.var["ensembl_id"][loc]` → `.iloc[loc]`
+  - `tokenize_anndata()` return value count fixed (2 → 3) to match `tokenize_files()` unpacking
+  - File count glob fixed from hardcoded `*.loom` to `*.{file_format}` (h5ad runs no longer infinite-loop / fail to terminate)
+
 ### v0.2.0 — Path Portability, Auto-Resource Tuning, and Build Fixes
 
 **Portable Path Resolution**

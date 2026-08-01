@@ -129,6 +129,9 @@ class TranscriptomeTokenizer:
         with open(token_dictionary_file, "rb") as f:
             self.gene_token_dict = pickle.load(f)
 
+        # initialize genelist_dict for h5ad tokenization
+        gene_keys = list(self.gene_median_dict.keys())
+        self.genelist_dict = dict(zip(gene_keys, [True] * len(gene_keys)))
 
         self.start_reading_file_num = 0
 
@@ -202,7 +205,7 @@ class TranscriptomeTokenizer:
             self.tokenize_loom if file_format == "loom" else self.tokenize_anndata
         )
 
-        total_loom_datas = len(glob.glob(data_directory+"*.loom"))
+        total_loom_datas = len(glob.glob(data_directory+f"*.{file_format}"))
         total_cells_num = 0
         for enum1, file_path in enumerate(Path(data_directory).glob("*.{}".format(file_format))):
             if (enum1 < self.start_reading_file_num) :
@@ -242,7 +245,7 @@ class TranscriptomeTokenizer:
         return tokenized_cells, cell_metadata
 
     def tokenize_anndata(self, adata_file_path, target_sum=10_000, chunk_size=512):
-        adata = ad.read(adata_file_path, backed="r")
+        adata = ad.read_h5ad(adata_file_path, backed="r")
 
         if self.custom_attr_name_dict is not None:
             file_cell_metadata = {
@@ -255,10 +258,10 @@ class TranscriptomeTokenizer:
         norm_factor_vector = np.array(
             [
                 self.gene_median_dict[i]
-                for i in adata.var["ensembl_id"][coding_miRNA_loc]
+                for i in adata.var["ensembl_id"].iloc[coding_miRNA_loc]
             ]
         )
-        coding_miRNA_ids = adata.var["ensembl_id"][coding_miRNA_loc]
+        coding_miRNA_ids = adata.var["ensembl_id"].iloc[coding_miRNA_loc]
         coding_miRNA_tokens = np.array(
             [self.gene_token_dict[i] for i in coding_miRNA_ids]
         )
@@ -302,7 +305,7 @@ class TranscriptomeTokenizer:
             else:
                 file_cell_metadata = None
 
-        return tokenized_cells, file_cell_metadata
+        return tokenized_cells, file_cell_metadata, len(filter_pass_loc)
 
     def tokenize_loom(self, loom_file_path, target_sum=10_000):
         if self.custom_attr_name_dict is not None:

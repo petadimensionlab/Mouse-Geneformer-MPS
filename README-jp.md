@@ -160,6 +160,21 @@ isp.perturb_data(
 
 ## 変更履歴
 
+### v0.3.0 — h5ad トークナイゼーション対応
+
+- **`execute_tokenizer.py`**: loom ではなく **h5ad** 入力で動作するように修正
+  - `file_format="h5ad"`、`data_directory="./data/tutorial_h5ad/"`、`output_directory="./data/tokenized/"`、`output_prefix="tutorial_mouse"`
+  - `nproc` を `min(8, os.cpu_count())` に自動設定
+- **チュートリアルデータ**: `scanpy.datasets.paul15()`（マウス骨髄、2,730細胞 × 3,451遺伝子）を使用
+  - 遺伝子シンボルをプロジェクトの `GeneSymbol_to_EnsemblID.pkl` を使ってマウス Ensembl ID（`ENSMUSG...`）に変換（3,107遺伝子がトークン辞書に一致）
+  - `obs["n_counts"]` を raw counts から算出
+- **`geneformer/tokenizer.py` の h5ad パス修正**（従来 h5ad パスは動作していなかった）:
+  - `self.genelist_dict` を `__init__` で初期化（loom パスでのみ設定されていたため h5ad のみの実行で `AttributeError` になる問題を修正）
+  - `ad.read()`（非推奨）→ `ad.read_h5ad()` に変更
+  - pandas のラベル/位置インデックス混同: `adata.var["ensembl_id"][loc]` → `.iloc[loc]` に修正
+  - `tokenize_anndata()` の戻り値の数（2 → 3）を `tokenize_files()` のアンパックに合わせて修正
+  - ファイル数カウントの glob をハードコードされた `*.loom` から `*.{file_format}` に修正（h5ad 実行時に無限ループで終了しない問題を修正）
+
 ### v0.2.0 — パスのポータビリティ対応、自動リソースチューニング、ビルド修正
 
 **パスのポータビリティ対応**
