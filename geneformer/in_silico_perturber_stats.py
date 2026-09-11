@@ -35,12 +35,46 @@ from .tokenizer import TOKEN_DICTIONARY_FILE
 import sys
 
 
-GENE_NAME_ID_DICTIONARY_FILE = "/Users/petadimensionlab/workspace/Mouse-Geneformer-MPS/data/Mouse-Genecorpus-20M/MLM-re_token_dictionary_v1_GeneSymbol_to_EnsemblID.pkl"
+GENE_NAME_ID_DICTIONARY_FILE = str(
+    Path(__file__).resolve().parents[1]
+    / "data" / "Mouse-Genecorpus-20M"
+    / "MLM-re_token_dictionary_v1_GeneSymbol_to_EnsemblID.pkl"
+)
 
 
 logger = logging.getLogger(__name__)
 
 # invert dictionary keys/values
+def _first_token(genes):
+    """gene_list の要素（(token,) / (token_a, token_b) / token）から代表トークンを取り出す。
+
+    元実装は `genes[1]` を決め打ちしており、単一遺伝子の摂動（長さ 1 のタプル）で
+    IndexError: tuple index out of range になっていた。
+    """
+    if isinstance(genes, tuple):
+        return genes[0] if len(genes) == 1 else genes[1]
+    return genes
+
+
+def _goal_of(state_tuple):
+    """ISP が記録した状態タプルから goal 状態の cos shift を取り出す。
+
+    タプルの並びは get_possible_states() = [start_state, goal_state] + alt_states。
+    元実装は `goal_end for start_state, goal_end in ...` と固定長で展開していたため、
+    alt_states が 2 個以上あると "too many values to unpack" で落ちていた。
+    """
+    return tuple(state_tuple)[1]
+
+
+def _alt_mean_of(state_tuple):
+    """状態タプルの alt_states 部分（index 2 以降）の平均。
+
+    alt が 1 個なら従来と同じ値、複数ならその平均になる。
+    """
+    t = tuple(state_tuple)
+    return float(np.mean(t[2:])) if len(t) > 2 else float("nan")
+
+
 def invert_dict(dictionary):
     return {v: k for k, v in dictionary.items()}
 
@@ -152,10 +186,10 @@ def isp_stats_to_goal_state(cos_sims_df, dict_list, cell_states_to_model, genes_
         for dict_i in dict_list:
             cos_shift_data += dict_i.get((token, "cell_emb"),[])
         if alt_end_state_exists == False:
-            cos_sims_full_df["Shift_to_goal_end"] = [goal_end for start_state,goal_end in cos_shift_data] 
+            cos_sims_full_df["Shift_to_goal_end"] = [_goal_of(t) for t in cos_shift_data] 
         if alt_end_state_exists == True:
-            cos_sims_full_df["Shift_to_goal_end"] = [goal_end for start_state,goal_end,alt_end in cos_shift_data] 
-            cos_sims_full_df["Shift_to_alt_end"] = [alt_end for start_state,goal_end,alt_end in cos_shift_data]
+            cos_sims_full_df["Shift_to_goal_end"] = [_goal_of(t) for t in cos_shift_data] 
+            cos_sims_full_df["Shift_to_alt_end"] = [_alt_mean_of(t) for t in cos_shift_data]
         
         # sort by shift to desired state
         cos_sims_full_df = cos_sims_full_df.sort_values(by=["Shift_to_goal_end"],
@@ -170,10 +204,10 @@ def isp_stats_to_goal_state(cos_sims_df, dict_list, cell_states_to_model, genes_
                 random_tuples += dict_i.get((token, "cell_emb"),[])
 
         if alt_end_state_exists == False:
-            goal_end_random_megalist = [goal_end for start_state,goal_end in random_tuples]
+            goal_end_random_megalist = [_goal_of(t) for t in random_tuples]
         elif alt_end_state_exists == True:
-            goal_end_random_megalist = [goal_end for start_state,goal_end,alt_end in random_tuples]
-            alt_end_random_megalist = [alt_end for start_state,goal_end,alt_end in random_tuples]
+            goal_end_random_megalist = [_goal_of(t) for t in random_tuples]
+            alt_end_random_megalist = [_alt_mean_of(t) for t in random_tuples]
 
         # downsample to improve speed of ranksums
         if len(goal_end_random_megalist) > 100_000:
@@ -206,10 +240,10 @@ def isp_stats_to_goal_state(cos_sims_df, dict_list, cell_states_to_model, genes_
                 cos_shift_data += dict_i.get((token, "cell_emb"),[])
 
             if alt_end_state_exists == False:
-                goal_end_cos_sim_megalist = [goal_end for start_state,goal_end in cos_shift_data]    
+                goal_end_cos_sim_megalist = [_goal_of(t) for t in cos_shift_data]    
             elif alt_end_state_exists == True:
-                goal_end_cos_sim_megalist = [goal_end for start_state,goal_end,alt_end in cos_shift_data]
-                alt_end_cos_sim_megalist = [alt_end for start_state,goal_end,alt_end in cos_shift_data]
+                goal_end_cos_sim_megalist = [_goal_of(t) for t in cos_shift_data]
+                alt_end_cos_sim_megalist = [_alt_mean_of(t) for t in cos_shift_data]
                 mean_alt_end = np.mean(alt_end_cos_sim_megalist)
                 pval_alt_end = ranksums(alt_end_random_megalist,alt_end_cos_sim_megalist).pvalue
 
@@ -689,9 +723,7 @@ class InSilicoPerturberStats:
                                                           for item in gene_list], \
                                             "Ensembl_ID": [token_tuple_to_ensembl_ids(genes, self.gene_token_id_dict) \
                                                            if self.genes_perturbed != "all" else \
-                                                           self.gene_token_id_dict[genes[1]] \
-                                                           if isinstance(genes,tuple) else \
-                                                           self.gene_token_id_dict[genes] \
+                                                           self.gene_token_id_dict[_first_token(genes)] \
                                                            for genes in gene_list]}, \
                                              index=[i for i in range(len(gene_list))])
 
