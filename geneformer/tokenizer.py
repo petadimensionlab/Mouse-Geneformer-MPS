@@ -53,8 +53,12 @@ DEVICE = get_torch_device()
 USE_GPU = DEVICE
 
 # need file path
-GENE_MEDIAN_FILE = "/Users/petadimensionlab/workspace/Mouse-Geneformer-MPS/data/Mouse-Genecorpus-20M/mouse_gene_median_dictionary.pkl"
-TOKEN_DICTIONARY_FILE = "/Users/petadimensionlab/workspace/Mouse-Geneformer-MPS/data/Mouse-Genecorpus-20M/MLM-re_token_dictionary_v1.pkl"
+# リポジトリを移動しても壊れないよう、このファイルからの相対位置で解決する
+# （以前は絶対パスがハードコードされており、チェックアウト移動後に壊れていた）
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_GENECORPUS_DIR = _REPO_ROOT / "data" / "Mouse-Genecorpus-20M"
+GENE_MEDIAN_FILE = str(_GENECORPUS_DIR / "mouse_gene_median_dictionary.pkl")
+TOKEN_DICTIONARY_FILE = str(_GENECORPUS_DIR / "MLM-re_token_dictionary_v1.pkl")
 
 
 def rank_genes(gene_vector, gene_tokens):
@@ -201,14 +205,18 @@ class TranscriptomeTokenizer:
             self.tokenize_loom if file_format == "loom" else self.tokenize_anndata
         )
 
-        total_loom_datas = len(glob.glob(data_directory+"*.loom"))
+        # 実際に処理する拡張子でファイル数を数える。
+        # 旧実装は loom 固定で数えていたため、h5ad 入力だと 0 になり
+        # 下の last_dataset_flag 判定（enum1 == total - 1）が成立せず、
+        # データセットが終了しない／無限ループになるバグがあった。
+        total_datas = len(list(Path(data_directory).glob("*.{}".format(file_format))))
         total_cells_num = 0
         for enum1, file_path in enumerate(Path(data_directory).glob("*.{}".format(file_format))):
             if (enum1 < self.start_reading_file_num) :
                 continue
             file_found = 1
             print("=================================")
-            print("[{} / {}]".format(enum1, total_loom_datas))
+            print("[{} / {}]".format(enum1, total_datas))
             print("Tokenizing : {}".format(file_path))
 
             file_tokenized_cells, file_cell_metadata, cells_num = tokenize_file_fn(file_path)
@@ -223,7 +231,7 @@ class TranscriptomeTokenizer:
             total_cells_num += cells_num
 
 
-            if enum1 == total_loom_datas -1 :
+            if enum1 == total_datas -1 :
                 self.last_dataset_flag = True
             else :
                 if total_cells_num >= self.max_cells :
@@ -241,23 +249,35 @@ class TranscriptomeTokenizer:
         return tokenized_cells, cell_metadata
 
     def tokenize_anndata(self, adata_file_path, target_sum=10_000, chunk_size=512):
-        adata = ad.read(adata_file_path, backed="r")
+        # anndata >= 0.11 で `anndata.read` は削除されたため read_h5ad を使う
+        adata = ad.read_h5ad(adata_file_path, backed="r")
 
         if self.custom_attr_name_dict is not None:
             file_cell_metadata = {
                 attr_key: [] for attr_key in self.custom_attr_name_dict.keys()
             }
 
+        # `gene_keys` / `genelist_dict` は tokenize_loom() でしか設定されていないため、
+        # h5ad 経路でも使えるようここで用意する（未設定だと AttributeError になる）
+        if not hasattr(self, "genelist_dict"):
+            self.gene_keys = list(self.gene_median_dict.keys())
+            self.genelist_dict = dict(
+                zip(self.gene_keys, [True] * len(self.gene_keys))
+            )
+
+        # 注意: `adata.var["ensembl_id"][loc]` は pandas 2.x ではラベル参照になり
+        # KeyError になるため、ndarray に落としてから位置指定で取り出す
+        ensembl_ids = np.asarray(adata.var["ensembl_id"])
         coding_miRNA_loc = np.where(
-            [self.genelist_dict.get(i, False) for i in adata.var["ensembl_id"]]
+            [self.genelist_dict.get(i, False) for i in ensembl_ids]
         )[0]
         norm_factor_vector = np.array(
             [
-                self.gene_median_dict[i]
-                for i in adata.var["ensembl_id"][coding_miRNA_loc]
+                self.gene_median_dict[ensembl_ids[i]]
+                for i in coding_miRNA_loc
             ]
         )
-        coding_miRNA_ids = adata.var["ensembl_id"][coding_miRNA_loc]
+        coding_miRNA_ids = ensembl_ids[coding_miRNA_loc]
         coding_miRNA_tokens = np.array(
             [self.gene_token_dict[i] for i in coding_miRNA_ids]
         )
@@ -301,7 +321,9 @@ class TranscriptomeTokenizer:
             else:
                 file_cell_metadata = None
 
-        return tokenized_cells, file_cell_metadata
+        # tokenize_files() は 3 値（cells, metadata, cells_num）を期待するため、
+        # loom 経路と同様に細胞数も返す（旧実装は 2 値で ValueError になっていた）
+        return tokenized_cells, file_cell_metadata, len(filter_pass_loc)
 
     def tokenize_loom(self, loom_file_path, target_sum=10_000):
         if self.custom_attr_name_dict is not None:
