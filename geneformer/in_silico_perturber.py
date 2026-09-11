@@ -48,6 +48,16 @@ logger = logging.getLogger(__name__)
 ISP_device = USE_GPU
 
 
+def safe_num_proc(nproc):
+    """datasets の map/filter に渡す num_proc を安全化する。
+
+    MPS を初期化した後に fork した子プロセスは落ちることがある
+    （"One of the subprocesses has abruptly died during map operation."）。
+    1 以下は単一プロセス（None）にして fork 自体を避ける。
+    """
+    return nproc if (isinstance(nproc, int) and nproc > 1) else None
+
+
 # load data and filter by defined criteria
 def load_and_filter(filter_data, nproc, input_data_file):
     data = load_from_disk(input_data_file)
@@ -55,13 +65,49 @@ def load_and_filter(filter_data, nproc, input_data_file):
         for key,value in filter_data.items():
             def filter_data_by_criteria(example):
                 return example[key] in value
-            data = data.filter(filter_data_by_criteria, num_proc=nproc)
+            data = data.filter(filter_data_by_criteria, num_proc=safe_num_proc(nproc))
         if len(data) == 0:
             logger.error(
                     "No cells remain after filtering. Check filtering criteria.")
             raise
     data_shuffled = data.shuffle(seed=42)
     return data_shuffled
+
+class EncoderOnlyModel:
+    """head（LM / 分類）を計算せず hidden_states だけを返す薄いラッパー。
+
+    このリポジトリの埋め込み抽出・in silico perturbation は
+    `outputs.hidden_states[layer]` しか参照しない（`.logits` は未使用）。
+    ところが BertForMaskedLM は forward のたびに語彙 56,084 への射影を計算して
+    捨てており、実測で forward 時間の約 40%（MPS: 35 ms → 21 ms / batch8@len619）と
+    相応のメモリを無駄に消費していた。encoder のみを呼ぶことで高速・省メモリになる。
+    head は `self._head` に保持するので必要になれば取り出せる。
+    """
+
+    def __init__(self, model):
+        self._head = model
+        self.bert = model.bert
+        self.config = model.config
+
+    def __call__(self, input_ids=None, attention_mask=None, **kwargs):
+        return self.bert(input_ids=input_ids, attention_mask=attention_mask,
+                         output_hidden_states=True, output_attentions=False)
+
+    def eval(self):
+        self.bert.eval()
+        return self
+
+    def train(self, mode=True):
+        self.bert.train(mode)
+        return self
+
+    def to(self, *args, **kwargs):
+        self._head.to(*args, **kwargs)
+        return self
+
+    def named_parameters(self):
+        return self.bert.named_parameters()
+
 
 # load model to GPU
 def load_model(model_type, num_classes, model_directory):
@@ -84,7 +130,8 @@ def load_model(model_type, num_classes, model_directory):
     #model = model.to("cuda:0")
     #model = model.to("cuda")
     model = model.to(ISP_device)
-    return model
+    # head は使われないため計算を省く（hidden_states のみ必要）
+    return EncoderOnlyModel(model)
 
 def quant_layers(model):
     layer_nums = []
@@ -433,7 +480,7 @@ def quant_cos_sims(model,
     
     # measure length of each element in perturbation_batch
     perturbation_batch = perturbation_batch.map(
-            measure_length, num_proc=nproc
+            measure_length, num_proc=safe_num_proc(nproc)
         )
 
     def compute_batch_embeddings(minibatch, _max_len = None):
@@ -465,7 +512,7 @@ def quant_cos_sims(model,
                                                                pad_token_id, 
                                                                max_len)
                 return example
-            minibatch = minibatch.map(pad_or_trunc_example, num_proc=nproc)
+            minibatch = minibatch.map(pad_or_trunc_example, num_proc=safe_num_proc(nproc))
 
         input_data_minibatch = torch.stack([torch.tensor(x) for x in minibatch["input_ids"]])
         attention_mask = gen_attention_mask(minibatch, max_len)
@@ -794,6 +841,7 @@ class InSilicoPerturber:
         "cell_emb_style": {"mean_pool"},
         "filter_data": {None, dict},
         "cell_states_to_model": {None, dict},
+        "state_embs_dict": {None, dict},
         "max_ncells": {None, int},
         "cell_inds_to_perturb": {"all", dict},
         "emb_layer": {-1, 0},
@@ -819,6 +867,7 @@ class InSilicoPerturber:
         emb_layer=-1,
         forward_batch_size=100,
         nproc=4,
+        state_embs_dict=None,
         token_dictionary_file=TOKEN_DICTIONARY_FILE,
     ):
         """
@@ -924,6 +973,7 @@ class InSilicoPerturber:
         self.cell_emb_style = cell_emb_style
         self.filter_data = filter_data
         self.cell_states_to_model = cell_states_to_model
+        self.state_embs_dict = state_embs_dict
         self.max_ncells = max_ncells
         self.cell_inds_to_perturb = cell_inds_to_perturb
         self.emb_layer = emb_layer
@@ -1176,19 +1226,24 @@ class InSilicoPerturber:
                         f"{value} is not present in the dataset's {state_name} attribute.")
                     raise
             # get dictionary of average cell state embeddings for comparison
-            downsampled_data = downsample_and_sort(filtered_input_data, self.max_ncells)
-            state_embs_dict = get_cell_state_avg_embs(model,
-                                                      downsampled_data,
-                                                      self.cell_states_to_model,
-                                                      layer_to_quant,
-                                                      self.pad_token_id,
-                                                      self.forward_batch_size,
-                                                      self.nproc)
+            # 事前計算済みの state_embs_dict が渡されていればそれを使う（同じ結果を
+            # ランごとに再計算するのは無駄なので、キャッシュとして受け取れるようにした）
+            if getattr(self, "state_embs_dict", None) is not None:
+                state_embs_dict = self.state_embs_dict
+            else:
+                downsampled_data = downsample_and_sort(filtered_input_data, self.max_ncells)
+                state_embs_dict = get_cell_state_avg_embs(model,
+                                                          downsampled_data,
+                                                          self.cell_states_to_model,
+                                                          layer_to_quant,
+                                                          self.pad_token_id,
+                                                          self.forward_batch_size,
+                                                          self.nproc)
             # filter for start state cells
             start_state = self.cell_states_to_model["start_state"]
             def filter_for_origin(example):
                 return example[state_name] in [start_state]
-            filtered_input_data = filtered_input_data.filter(filter_for_origin, num_proc=self.nproc)
+            filtered_input_data = filtered_input_data.filter(filter_for_origin, num_proc=safe_num_proc(self.nproc))
         self.in_silico_perturb(model,
                               filtered_input_data,
                               layer_to_quant,
@@ -1212,7 +1267,7 @@ class InSilicoPerturber:
         if self.anchor_token is not None:
             def if_has_tokens_to_perturb(example):
                 return (len(set(example["input_ids"]).intersection(self.anchor_token))==len(self.anchor_token))
-            filtered_input_data = filtered_input_data.filter(if_has_tokens_to_perturb, num_proc=self.nproc) 
+            filtered_input_data = filtered_input_data.filter(if_has_tokens_to_perturb, num_proc=safe_num_proc(self.nproc)) 
             if len(filtered_input_data) == 0:
                 logger.error(
                         "No cells in dataset contain anchor gene.")
@@ -1226,7 +1281,7 @@ class InSilicoPerturber:
             
             def if_has_tokens_to_perturb(example):
                 return (len(set(example["input_ids"]).intersection(self.tokens_to_perturb))>=min_genes)
-            filtered_input_data = filtered_input_data.filter(if_has_tokens_to_perturb, num_proc=self.nproc)
+            filtered_input_data = filtered_input_data.filter(if_has_tokens_to_perturb, num_proc=safe_num_proc(self.nproc))
             if len(filtered_input_data) == 0:
                 logger.error(
                         "No cells in dataset contain all genes to perturb as a group.")
@@ -1289,7 +1344,7 @@ class InSilicoPerturber:
                 else :
                     pass
                 return example 
-            perturbation_batch = filtered_input_data.map(make_group_perturbation_batch, num_proc=self.nproc)
+            perturbation_batch = filtered_input_data.map(make_group_perturbation_batch, num_proc=safe_num_proc(self.nproc))
             indices_to_perturb = perturbation_batch["perturb_index"]
 
             cos_sims_data = quant_cos_sims(model, 
