@@ -54,6 +54,9 @@ dev = [
     "pytest>=7.0",
 ]
 
+[tool.setuptools.packages.find]
+include = ["geneformer*"]
+
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"

@@ -1,24 +1,10 @@
-# Mouse-Geneformer
+# Mouse-Geneformer MPS compatible update
 
-Writer: Keita Ito
+Writer: Shinji Nakaoka
 
-## Abstract
+## Note
 
-This repository contains the source code of mouse-Geneformer for analyzing single-cell RNA-sequence data of mouse. Mouse-Geneformer is a model pre-trained on the large mouse single-cell dataset mouse-Genecorpus-20M and designed to map the mouse gene network. It improves the accuracy of cell type classification of mouse cells and enables in silico perturbation experiments on mouse specimens.
-
-[[bioRxiv](https://www.biorxiv.org/content/10.1101/2024.09.09.611960v1)]
-
-## Citation
-
-```bibtex
-@article{Ito2024.09.09.611960,
-   author = {Ito, Keita and Hirakawa, Tsubasa and Shigenobu, Shuji and Fujiyoshi, Hironobu and Yamashita, Takayoshi},
-   title = {Mouse-Geneformer: A Deep Leaning Model for Mouse Single-Cell Transcriptome and Its Cross-Species Utility},
-   journal = {bioRxiv},
-   year = {2024},
-   URL = {https://www.biorxiv.org/content/early/2024/09/13/2024.09.09.611960}
-}
-```
+This repository contains the source code of mouse-Geneformer to work with Apple Silicon GPU (MPS). 
 
 ## Pretrained Models
 
@@ -78,7 +64,7 @@ snapshot_download(
 )
 ```
 
-After downloading, update the paths in `geneformer/tokenizer.py` (lines 56-57) to match your local paths.
+The paths are now automatically resolved relative to the project directory — no manual path editing needed.
 
 ## Setup
 
@@ -109,6 +95,17 @@ The device is automatically detected (MPS → CUDA → CPU):
 from geneformer.tokenizer import DEVICE
 print(DEVICE)  # "mps" on Apple Silicon, "cuda:0" on NVIDIA, "cpu" otherwise
 ```
+
+### Automatic Resource Tuning
+
+The `InSilicoPerturber` and `EmbExtractor` classes automatically tune batch size and CPU parallelism based on available hardware:
+
+- **`forward_batch_size`**: Calculated from free VRAM (~350 MiB per sample at 2048 tokens, cap 250)
+- **`nproc`**: Set to half of available CPU cores
+
+Tensor Cores are automatically enabled on compatible NVIDIA GPUs (`torch.set_float32_matmul_precision("high")`).
+
+To use these defaults, simply omit `forward_batch_size` and `nproc` when constructing the class. Explicit values override auto-tuning.
 
 ## Usage
 
@@ -145,9 +142,44 @@ This project relies on several data files that must be downloaded separately:
 | Evaluation dataset | Set directly in notebook | HuggingFace dataset `eval_dataset/` |
 | Pretrained model | Set in notebook | Google Drive |
 
-Update the paths in `geneformer/tokenizer.py` (lines 56-57) and the notebooks to point to your downloaded files.
+All paths are now automatically resolved relative to the project directory.
 
 ## Changelog
+
+### v0.3.0 — h5ad Tokenization Support
+
+- **`execute_tokenizer.py`**: Now runs with **h5ad** input instead of loom
+  - `file_format="h5ad"` with `data_directory="./data/tutorial_h5ad/"`, `output_directory="./data/tokenized/"`, `output_prefix="tutorial_mouse"`
+  - `nproc` auto-set to `min(8, os.cpu_count())`
+- **Tutorial data**: Uses `scanpy.datasets.paul15()` (mouse bone marrow, 2,730 cells × 3,451 genes)
+  - Gene symbols mapped to mouse Ensembl IDs (`ENSMUSG...`) using the project's `GeneSymbol_to_EnsemblID.pkl` (3,107 genes matched the token dictionary)
+  - `obs["n_counts"]` computed from raw counts
+- **`geneformer/tokenizer.py` h5ad path fixes** (h5ad path was previously non-functional):
+  - `self.genelist_dict` now initialized in `__init__` (was only set in the loom path → `AttributeError` on h5ad-only runs)
+  - `ad.read()` (deprecated) → `ad.read_h5ad()`
+  - Pandas label-vs-positional indexing: `adata.var["ensembl_id"][loc]` → `.iloc[loc]`
+  - `tokenize_anndata()` return value count fixed (2 → 3) to match `tokenize_files()` unpacking
+  - File count glob fixed from hardcoded `*.loom` to `*.{file_format}` (h5ad runs no longer infinite-loop / fail to terminate)
+
+### v0.2.0 — Path Portability, Auto-Resource Tuning, and Build Fixes
+
+**Portable Path Resolution**
+- `geneformer/tokenizer.py`: Hardcoded absolute paths replaced with `Path(__file__).parent.parent` — files are now found relative to the project directory, no manual path editing needed after download
+- `geneformer/in_silico_perturber_stats.py`: `GENE_NAME_ID_DICTIONARY_FILE` path similarly made portable
+- `in_silico_perturbation.ipynb`: All hardcoded `/Users/petadimensionlab/...` paths replaced with relative paths (`./results/`, `./mouse-Geneformer-L12-E20/`)
+
+**Automatic Resource Tuning** (NVIDIA GB10 / large-GPU optimized)
+- `geneformer/in_silico_perturber.py`:
+  - `auto_forward_batch_size()`: Calculates optimal batch size from available VRAM (~350 MiB per sample, capped at 250 for safe 2048-token sequences)
+  - `auto_nproc()`: Uses half of available CPU cores (avoids system overload)
+  - `torch.set_float32_matmul_precision("high")`: Enables Tensor Cores on compatible GPUs
+  - `load_model()`: Simplified GPU placement
+  - `InSilicoPerturber.__init__` defaults are overridden with auto-tuned values when defaults are used
+- `geneformer/emb_extractor.py`: Same auto-tuning for `forward_batch_size` and `nproc`
+- `in_silico_perturbation.ipynb`: Removed explicit `forward_batch_size` and `nproc` from `InSilicoPerturber` call (now uses auto-tuned defaults)
+
+**Build System Fix**
+- `pyproject.toml`: Added `[tool.setuptools.packages.find]` with `include = ["geneformer*"]` to fix setuptools flat-layout error caused by the `data/` directory
 
 ### Migration to NumPy 2+ and MPS Support
 
@@ -166,11 +198,13 @@ Key changes from the original codebase:
 
 - `geneformer/in_silico_perturber.py`:
   - `forward_pass_single_cell`: Fixed batch dimension (added `.unsqueeze(0)`)
-  - `make_perturbation_batch`: Fixed Column multiplication erro
+  - `make_perturbation_batch`: Fixed Column multiplication error
   - `compute_batch_embeddings` / `get_cell_state_avg_embs`: Replaced `set_format(type="torch")` with explicit tensor conversion for datasets v5 compatibility
+  - `cos_sim_shift`: Added automatic dimension unification — unsqueezes 2D `[seq, hidden]` tensors to 3D `[batch, seq, hidden]` before comparison, preventing shape mismatches when processing batched perturbations
+  - `empty_cache()`: Replaced all `torch.cuda.empty_cache()` calls with an MPS-aware helper that handles both CUDA and MPS (`torch.mps.empty_cache()`)
   - Fixed typo: `"input_ids "` → `"input_ids"` (extra space in key name)
 - `geneformer/pretrainer.py`: Graceful handling of missing token dictionary file (uses minimal placeholder)
-- `geneformer/emb_extractor.py`: Same `set_format` → explicit tensor conversion fixes
+- `geneformer/emb_extractor.py`: Same `set_format` → explicit tensor conversion fixes; same `torch.cuda.empty_cache()` → `empty_cache()` replacement
 - `geneformer/__init__.py`: Removed imports of non-existent classes (`Cell_Type_Classification_TranscriptomeTokenizer`, `In_Silico_TranscriptomeTokenizer`)
 - `geneformer/tokenizer.py`: Fixed escape sequence in regex (raw string `r"\(|,"`)
 - `geneformer/tokenizer.py`: Updated hardcoded data paths from old workspace (`zedws/Mouse-Geneformer`) to current workspace (`Mouse-Geneformer-MPS`)

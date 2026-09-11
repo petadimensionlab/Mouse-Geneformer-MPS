@@ -78,7 +78,7 @@ snapshot_download(
 )
 ```
 
-ダウンロード後、`geneformer/tokenizer.py`（56-57行目）のパスを実際のパスに更新してください。
+パスはプロジェクトディレクトリからの相対パスで自動解決されるため、手動でのパス編集は不要です。
 
 ## セットアップ
 
@@ -109,6 +109,17 @@ pip install -e ".[dev]"
 from geneformer.tokenizer import DEVICE
 print(DEVICE)  # Apple Silicon では "mps"、NVIDIA GPU では "cuda:0"、それ以外では "cpu"
 ```
+
+### 自動リソースチューニング
+
+`InSilicoPerturber` および `EmbExtractor` クラスは、利用可能なハードウェアに基づいてバッチサイズと CPU 並列数を自動調整します:
+
+- **`forward_batch_size`**: 空き VRAM から計算（2048トークンでサンプルあたり約350 MiB、上限250）
+- **`nproc`**: 使用可能な CPU コアの半分を使用
+
+Tensor Core は互換性のある NVIDIA GPU で自動有効化されます（`torch.set_float32_matmul_precision("high")`）。
+
+デフォルト値を使用するには、`forward_batch_size` と `nproc` を省略してクラスを構築してください。明示的な値を指定すると自動チューニングは適用されません。
 
 ## 使用方法
 
@@ -145,9 +156,44 @@ isp.perturb_data(
 | 評価データセット | ノートブック内で直接指定 | HuggingFace データセット `eval_dataset/` |
 | 事前学習モデル | ノートブック内で指定 | Google Drive |
 
-`geneformer/tokenizer.py`（56-57行目）とノートブック内のパスを、ダウンロードしたファイルの実際のパスに更新してください。
+すべてのパスはプロジェクトディレクトリからの相対パスで自動解決されます。
 
 ## 変更履歴
+
+### v0.3.0 — h5ad トークナイゼーション対応
+
+- **`execute_tokenizer.py`**: loom ではなく **h5ad** 入力で動作するように修正
+  - `file_format="h5ad"`、`data_directory="./data/tutorial_h5ad/"`、`output_directory="./data/tokenized/"`、`output_prefix="tutorial_mouse"`
+  - `nproc` を `min(8, os.cpu_count())` に自動設定
+- **チュートリアルデータ**: `scanpy.datasets.paul15()`（マウス骨髄、2,730細胞 × 3,451遺伝子）を使用
+  - 遺伝子シンボルをプロジェクトの `GeneSymbol_to_EnsemblID.pkl` を使ってマウス Ensembl ID（`ENSMUSG...`）に変換（3,107遺伝子がトークン辞書に一致）
+  - `obs["n_counts"]` を raw counts から算出
+- **`geneformer/tokenizer.py` の h5ad パス修正**（従来 h5ad パスは動作していなかった）:
+  - `self.genelist_dict` を `__init__` で初期化（loom パスでのみ設定されていたため h5ad のみの実行で `AttributeError` になる問題を修正）
+  - `ad.read()`（非推奨）→ `ad.read_h5ad()` に変更
+  - pandas のラベル/位置インデックス混同: `adata.var["ensembl_id"][loc]` → `.iloc[loc]` に修正
+  - `tokenize_anndata()` の戻り値の数（2 → 3）を `tokenize_files()` のアンパックに合わせて修正
+  - ファイル数カウントの glob をハードコードされた `*.loom` から `*.{file_format}` に修正（h5ad 実行時に無限ループで終了しない問題を修正）
+
+### v0.2.0 — パスのポータビリティ対応、自動リソースチューニング、ビルド修正
+
+**パスのポータビリティ対応**
+- `geneformer/tokenizer.py`: ハードコードされた絶対パスを `Path(__file__).parent.parent` を用いた相対パスに変更 — ダウンロード後の手動パス編集は不要
+- `geneformer/in_silico_perturber_stats.py`: `GENE_NAME_ID_DICTIONARY_FILE` のパスも同様にポータブル化
+- `in_silico_perturbation.ipynb`: ハードコードされた `/Users/petadimensionlab/...` パスをすべて相対パス（`./results/`、`./mouse-Geneformer-L12-E20/`）に置き換え
+
+**自動リソースチューニング**（NVIDIA GB10 / 大容量GPU向け最適化）
+- `geneformer/in_silico_perturber.py`:
+  - `auto_forward_batch_size()`: 空きVRAMから最適なバッチサイズを算出（サンプルあたり約350 MiB、上限250）
+  - `auto_nproc()`: 使用可能なCPUコアの半分を使用（システム過負荷防止）
+  - `torch.set_float32_matmul_precision("high")`: 互換性のあるNVIDIA GPUでTensor Coreを有効化
+  - `load_model()`: GPU配置を簡略化
+  - `InSilicoPerturber.__init__`: デフォルト値使用時に自動チューニング値を適用
+- `geneformer/emb_extractor.py`: `forward_batch_size` と `nproc` に同様の自動チューニングを適用
+- `in_silico_perturbation.ipynb`: `InSilicoPerturber` 呼び出しから明示的な `forward_batch_size` と `nproc` を削除（自動チューニングを使用）
+
+**ビルドシステム修正**
+- `pyproject.toml`: `[tool.setuptools.packages.find]` に `include = ["geneformer*"]` を追加し、`data/` ディレクトリに起因する setuptools の flat-layout エラーを修正
 
 ### NumPy 2+ への移行と MPS サポート
 
@@ -168,9 +214,11 @@ isp.perturb_data(
   - `forward_pass_single_cell`: バッチ次元の欠落を修正（`.unsqueeze(0)` を追加）
   - `make_perturbation_batch`: Column の乗算エラーを修正
   - `compute_batch_embeddings` / `get_cell_state_avg_embs`: datasets v5 互換性のため `set_format(type="torch")` を明示的な tensor 変換に置き換え
+  - `cos_sim_shift`: 次元の自動統一を追加 — 2D `[seq, hidden]` を 3D `[batch, seq, hidden]` に unsqueeze してから比較することで、バッチ処理時のシェイプ不一致を防止
+  - `empty_cache()`: 全ての `torch.cuda.empty_cache()` を MPS 対応のヘルパー関数に置き換え（CUDA と MPS 両対応）
   - タイポ修正: `"input_ids "` → `"input_ids"`（キー名の余分なスペース）
 - `geneformer/pretrainer.py`: トークン辞書ファイルがない場合のグレースフルハンドリング（最小限のプレースホルダーを使用）
-- `geneformer/emb_extractor.py`: 同上の `set_format` → 明示的な tensor 変換の修正
+- `geneformer/emb_extractor.py`: 同上の `set_format` → 明示的な tensor 変換の修正、`torch.cuda.empty_cache()` → `empty_cache()` の置き換え
 - `geneformer/__init__.py`: 存在しないクラスのインポートを削除（`Cell_Type_Classification_TranscriptomeTokenizer`、`In_Silico_TranscriptomeTokenizer`）
 - `geneformer/in_silico_perturber.py`: 正規表現のエスケープシーケンスを修正（raw string `r"\(|,"`）
 - `geneformer/tokenizer.py`: データパスを旧ワークスペース（`zedws/Mouse-Geneformer`）から現ワークスペース（`Mouse-Geneformer-MPS`）に更新

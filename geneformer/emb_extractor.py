@@ -46,13 +46,16 @@ from transformers import BertForMaskedLM, BertForTokenClassification, BertForSeq
 from .tokenizer import TOKEN_DICTIONARY_FILE
 
 from .in_silico_perturber import downsample_and_sort, \
+                                 empty_cache, \
                                  gen_attention_mask, \
                                  get_model_input_size, \
                                  load_and_filter, \
                                  load_model, \
                                  mean_nonpadding_embs, \
                                  pad_tensor_list, \
-                                 quant_layers
+                                 quant_layers, \
+                                 auto_forward_batch_size, \
+                                 auto_nproc
 
 from .in_silico_perturber import ISP_device
 
@@ -117,7 +120,7 @@ def get_embs(model,
         del input_data_minibatch
         del embs_i
         del mean_embs
-        torch.cuda.empty_cache()            
+        empty_cache()            
     
     if summary_stat is None:
         embs_stack = torch.cat(embs_list)
@@ -318,8 +321,8 @@ class EmbExtractor:
         self.emb_layer = emb_layer
         self.emb_label = emb_label
         self.labels_to_plot = labels_to_plot
-        self.forward_batch_size = forward_batch_size
-        self.nproc = nproc
+        self.forward_batch_size = auto_forward_batch_size() if forward_batch_size == 100 else forward_batch_size
+        self.nproc = auto_nproc() if nproc == 4 else nproc
         self.summary_stat = summary_stat
 
         self.validate_options()

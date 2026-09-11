@@ -28,6 +28,7 @@ Usage:
 # imports
 import itertools as it
 import logging
+import os
 import numpy as np
 import pickle
 import re
@@ -47,15 +48,49 @@ logger = logging.getLogger(__name__)
 
 ISP_device = USE_GPU
 
+if ISP_device != "cpu":
+    torch.set_float32_matmul_precision("high")
+
+_CPU_COUNT = len(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else (os.cpu_count() or 4)
+
+def auto_forward_batch_size(free_mib=None):
+    if torch.cuda.is_available():
+        free, total = torch.cuda.mem_get_info(0)
+        free_mib = free / (1024 * 1024)
+    else:
+        return 100
+    # ~350 MiB per sample at 2048 tokens: reserve 2 GiB for model/overhead
+    estimate = int((free_mib - 2048) / 350)
+    return max(min(estimate, 250), 100)
+
+def auto_nproc():
+    return max(_CPU_COUNT // 2, 1)
+
+def _mps_in_use():
+    """MPS バックエンドが実際に初期化されているかを判定する。"""
+    try:
+        import torch
+        if not hasattr(torch.backends, "mps") or not torch.backends.mps.is_available():
+            return False
+        is_init = getattr(torch.mps, "is_initialized", None)
+        if callable(is_init):
+            return bool(is_init())
+        return True  # 判定 API が無い版では安全側に倒す
+    except Exception:
+        return False
+
 
 def safe_num_proc(nproc):
     """datasets の map/filter に渡す num_proc を安全化する。
 
     MPS を初期化した後に fork した子プロセスは落ちることがある
     （"One of the subprocesses has abruptly died during map operation."）。
-    1 以下は単一プロセス（None）にして fork 自体を避ける。
+    1 以下は単一プロセス（None）にして fork 自体を避け、さらに MPS 使用中は
+    要求値にかかわらず単一プロセスに落とす（自動 CPU 調整との併用で再発するため）。
     """
-    return nproc if (isinstance(nproc, int) and nproc > 1) else None
+    if isinstance(nproc, int) and nproc > 1 and not _mps_in_use():
+        return nproc
+    return None
 
 
 # load data and filter by defined criteria
@@ -127,8 +162,6 @@ def load_model(model_type, num_classes, model_directory):
                                                 output_attentions=False)
     # put the model in eval mode for fwd pass
     model.eval()
-    #model = model.to("cuda:0")
-    #model = model.to("cuda")
     model = model.to(ISP_device)
     # head は使われないため計算を省く（hidden_states のみ必要）
     return EncoderOnlyModel(model)
@@ -142,6 +175,13 @@ def quant_layers(model):
 
 def get_model_input_size(model):
     return int(re.split(r"\(|,",str(model.bert.embeddings.position_embeddings))[1])
+
+def empty_cache():
+    """Clear GPU/MPS cache. Works with both CUDA and MPS."""
+    if torch.cuda.is_available():
+        empty_cache()
+    elif torch.backends.mps.is_available():
+        torch.mps.empty_cache()
 
 def flatten_list(megalist):
     return [item for sublist in megalist for item in sublist]
@@ -438,7 +478,7 @@ def get_cell_state_avg_embs(model,
             del input_data_minibatch
             del attention_mask
             del state_embs_i
-            torch.cuda.empty_cache()
+            empty_cache()
 
         state_embs = torch.cat(state_embs_list)
         avg_state_emb = mean_nonpadding_embs(state_embs, torch.Tensor(original_lens).to(ISP_device))
@@ -696,7 +736,7 @@ def quant_cos_sims(model,
             del minibatch_comparison
         if perturb_group == True:
             del original_minibatch_emb
-        torch.cuda.empty_cache()
+        empty_cache()
     if cell_states_to_model is None:
         cos_sims_stack = torch.cat(cos_sims)
         return cos_sims_stack
@@ -714,6 +754,13 @@ def cos_sim_shift(original_emb,
                   original_minibatch_lengths = None, 
                   minibatch_lengths = None):
     cos = torch.nn.CosineSimilarity(dim=2)
+    # Ensure all tensors are 3D [batch, seq, hidden] for consistent handling
+    if original_emb.dim() == 2:
+        original_emb = original_emb.unsqueeze(0)
+    if minibatch_emb.dim() == 2:
+        minibatch_emb = minibatch_emb.unsqueeze(0)
+    if end_emb.dim() == 2:
+        end_emb = end_emb.unsqueeze(1)
     if original_emb.size() != minibatch_emb.size():
         logger.error(
             f"Embeddings are not the same dimensions. " \
@@ -977,8 +1024,8 @@ class InSilicoPerturber:
         self.max_ncells = max_ncells
         self.cell_inds_to_perturb = cell_inds_to_perturb
         self.emb_layer = emb_layer
-        self.forward_batch_size = forward_batch_size
-        self.nproc = nproc
+        self.forward_batch_size = auto_forward_batch_size() if forward_batch_size == 100 else forward_batch_size
+        self.nproc = auto_nproc() if nproc == 4 else nproc
 
         self.validate_options()
 
@@ -1610,7 +1657,7 @@ class InSilicoPerturber:
                     # reset dict
                     del cos_sims_dict
                     cos_sims_dict = defaultdict(list)
-                    torch.cuda.empty_cache()
+                    empty_cache()
 
             # save remainder cells
             with open(f"{output_path_prefix}{pickle_batch}_raw.pickle", "wb") as fp:

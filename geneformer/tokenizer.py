@@ -53,12 +53,9 @@ DEVICE = get_torch_device()
 USE_GPU = DEVICE
 
 # need file path
-# リポジトリを移動しても壊れないよう、このファイルからの相対位置で解決する
-# （以前は絶対パスがハードコードされており、チェックアウト移動後に壊れていた）
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-_GENECORPUS_DIR = _REPO_ROOT / "data" / "Mouse-Genecorpus-20M"
-GENE_MEDIAN_FILE = str(_GENECORPUS_DIR / "mouse_gene_median_dictionary.pkl")
-TOKEN_DICTIONARY_FILE = str(_GENECORPUS_DIR / "MLM-re_token_dictionary_v1.pkl")
+_HERE = Path(__file__).parent.parent
+GENE_MEDIAN_FILE = str(_HERE / "data" / "Mouse-Genecorpus-20M" / "mouse_gene_median_dictionary.pkl")
+TOKEN_DICTIONARY_FILE = str(_HERE / "data" / "Mouse-Genecorpus-20M" / "MLM-re_token_dictionary_v1.pkl")
 
 
 def rank_genes(gene_vector, gene_tokens):
@@ -132,6 +129,9 @@ class TranscriptomeTokenizer:
         with open(token_dictionary_file, "rb") as f:
             self.gene_token_dict = pickle.load(f)
 
+        # initialize genelist_dict for h5ad tokenization
+        gene_keys = list(self.gene_median_dict.keys())
+        self.genelist_dict = dict(zip(gene_keys, [True] * len(gene_keys)))
 
         self.start_reading_file_num = 0
 
