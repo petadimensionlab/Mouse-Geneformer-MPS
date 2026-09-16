@@ -60,8 +60,3 @@ include = ["geneformer*"]
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
-
-# パッケージ探索を明示（このリポジトリは data/ results/ なども持つため
-# setuptools の自動探索が失敗し、`pip install -e .` が通らなかった）
-[tool.setuptools]
-packages = ["geneformer"]
