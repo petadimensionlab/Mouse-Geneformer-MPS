@@ -1,0 +1,52 @@
+arch=['BertForMaskedLM'] layers=12 hidden=256 heads=4 vocab=56084 max_pos=2048
+tie_word_embeddings: True | lm_head shares storage with input emb: True
+mps available: True
+
+=== 1. parameter breakdown (total 21.33M, fp32 = 81.4 MiB) ===
+  word_embeddings (vocab x hidden)   14.358M   67.3%     54.8 MiB fp32
+  encoder Linear w (attn/dense)     6.298M   29.5%     24.0 MiB fp32
+  position/token_type emb           0.525M    2.5%      2.0 MiB fp32
+  cls.predictions (MLM head)        0.122M    0.6%      0.5 MiB fp32
+  encoder bias/LayerNorm            0.028M    0.1%      0.1 MiB fp32
+
+  params a Linear-only quantizer can touch : 6.298M (29.5%)
+  untouched (embeddings + norms, stay fp16/32): 15.033M (70.5%)
+
+  best case if ONLY Linear weights are quantized (what bnb / quantize_dynamic do):
+    int8 Linear + others bf16 ->  34.7 MiB (42.6% of fp32, 2.35x smaller)
+    int8 Linear + others fp32 ->  63.4 MiB (77.9% of fp32, 1.28x smaller)
+    nf4 Linear  + others bf16 ->  31.7 MiB (38.9% of fp32, 2.57x smaller)
+    nf4 Linear  + others fp32 ->  60.3 MiB (74.2% of fp32, 1.35x smaller)
+  for reference, quantizing EVERYTHING including the embedding table:
+    all-8-bit ->  20.3 MiB (25.0%, 4.00x)
+    all-4-bit ->  10.2 MiB (12.5%, 8.00x)
+
+=== 2/3. fidelity + latency (batch 16 x 512 tokens, CPU, 10 threads) ===
+  variant                     size MiB  %fp32   s/fwd  hidden cos  cell-emb cos logit maxdiff
+  fp32 (baseline)                 81.4  100.0    0.25    1.000380      1.000000    0.0000e+00
+  bfloat16 cast                   40.7   50.0    2.33    1.000185      0.999960    1.4048e+00
+  float16 cast                    40.7   50.0    1.94    1.000372      1.000000    1.6993e-01
+/Users/petadimensionlab/workspace/research/Mouse-Geneformer-MPS/quant/quant_report.py:122: DeprecationWarning: torch.ao.quantization is deprecated and will be removed in 2.10. 
+For migrations of users: 
+1. Eager mode quantization (torch.ao.quantization.quantize, torch.ao.quantization.quantize_dynamic), please migrate to use torchao eager mode quantize_ API instead 
+2. FX graph mode quantization (torch.ao.quantization.quantize_fx.prepare_fx,torch.ao.quantization.quantize_fx.convert_fx, please migrate to use torchao pt2e quantization API instead (prepare_pt2e, convert_pt2e) 
+3. pt2e quantization has been migrated to torchao (https://github.com/pytorch/ao/tree/main/torchao/quantization/pt2e) 
+see https://github.com/pytorch/ao/issues/2259 for more details
+  qc = quantize_dynamic(copy.deepcopy(model), {nn.Linear}, dtype=torch.qint8)
+/Users/petadimensionlab/workspace/research/Mouse-Geneformer-MPS/.venv/lib/python3.14/site-packages/torch/ao/nn/quantized/modules/utils.py:72: UserWarning: torch.quantize_per_tensor, torch.quantize_per_channel and other quantized tensor creation functions that produce tensors with dtype torch.quint8, torch.qint8, and torch.qint32 are deprecated and will be removed in a future PyTorch release. Please see https://github.com/pytorch/pytorch/issues/184982 for more information. (Triggered internally at /Users/runner/work/pytorch/pytorch/aten/src/ATen/quantized/Quantizer.cpp:116.)
+  qweight = torch.quantize_per_tensor(
+  dynamic int8 failed: RuntimeError: Didn't find engine for operation quantized::linear_prepack NoQEngine
+
+  bitsandbytes NOT installed -> 4-bit/8-bit QLoRA path not measured here
+
+  MPS run failed: RuntimeError: Placeholder storage has not been allocated on MPS device!
+
+=== embedding-table structure (relevant to quantizing it directly) ===
+  shape (56084, 256) | absmax 8.263 | std 0.6257 | per-row absmax mean 2.917
+  400 random genes: mean pairwise cos 0.4921, p95 0.8915 -> HIGH redundancy
+
+=== low-rank structure of encoder Linear weights (LoRA suitability) ===
+  layer 0 query proj: rank 8= 24.2% 16= 40.4% 32= 62.3% of spectral energy
+  layer11 query proj: rank 8= 32.2% 16= 48.5% 32= 66.7% of spectral energy
+
+done

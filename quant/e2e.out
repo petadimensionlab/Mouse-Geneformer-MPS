@@ -1,0 +1,24 @@
+tokenized dataset: 2730 cells, features ['input_ids', 'length']
+emb_layer -> hidden_states[11] (quant_layers=12); pad_token_id=0
+  0%|          | 0/8 [00:00<?, ?it/s]
+reference cell embeddings: (256, 256)
+
+  variant                       cos mean  cos min   cos p5  cell-sim rho  norm ratio
+  0%|          | 0/8 [00:00<?, ?it/s]
+  fp16 whole model               1.00000   1.0000   1.0000       1.00000      1.0000
+  0%|          | 0/8 [00:00<?, ?it/s]
+  bf16 whole model               0.99997   0.9999   1.0000       0.99993      1.0030
+  0%|          | 0/8 [00:00<?, ?it/s]
+  int8 encoder | fp32 emb        0.99946   0.9992   0.9993       0.99960      0.9940
+  0%|          | 0/8 [00:00<?, ?it/s]
+  nf4 encoder  | fp32 emb        0.94424   0.9129   0.9237       0.96679      0.9579
+  0%|          | 0/8 [00:00<?, ?it/s]
+  int8 encoder | int8 emb        0.99945   0.9988   0.9993       0.99935      0.9933
+  0%|          | 0/8 [00:00<?, ?it/s]
+  int8 encoder | nf4 emb         0.99798   0.9877   0.9949       0.98024      0.9825
+  0%|          | 0/8 [00:00<?, ?it/s]
+  nf4 encoder  | nf4 emb         0.94211   0.9108   0.9218       0.94825      0.9413
+
+  (cell-sim rho = Spearman correlation of all pairwise cell-cell similarities vs fp32; 1.0 = identical neighbourhood structure)
+saved reference embeddings to quant/ref_cell_embs_fp32.npy
+done

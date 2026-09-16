@@ -1,0 +1,17 @@
+`torch_dtype` is deprecated! Use `dtype` instead!
+exported fp16 checkpoint -> /Users/petadimensionlab/workspace/research/Mouse-Geneformer-MPS/mouse-Geneformer-L12-E20-fp16
+  files: ['config.json', 'model.safetensors']
+  size 40.7 MiB vs fp32 81.4 MiB  (2.00x smaller)
+
+reloading with BertForMaskedLM.from_pretrained(..., torch_dtype=torch.float16)
+`torch_dtype` is deprecated! Use `dtype` instead!
+  loaded dtype: torch.float16
+  0%|          | 0/8 [00:00<?, ?it/s]
+  cell embeddings (256, 256) | cosine vs fp32: mean 1.000000 min 0.999999
+  max abs elementwise diff: 4.513e-04
+  VERDICT: PASS - embeddings preserved
+  0%|          | 0/8 [00:00<?, ?it/s]
+
+exported bf16 checkpoint -> /Users/petadimensionlab/workspace/research/Mouse-Geneformer-MPS/mouse-Geneformer-L12-E20-bf16  (40.7 MiB)
+  cosine vs fp32: mean 0.999970 min 0.999929
+done
